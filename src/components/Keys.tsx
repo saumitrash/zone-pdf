@@ -6,7 +6,7 @@ const BINDINGS: [string, string][] = [
   ["g  ⇧g", "start / end"],
   ["+  −  0", "zoom in / out / reset"],
   ["pinch  ⇧scroll", "zoom at the cursor"],
-  ["drag", "pan a zoomed page"],
+  ["drag over text", "select text"],
   ["t", "cycle theme"],
   ["d", "focus band"],
   ["f", "fullscreen"],

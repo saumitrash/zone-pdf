@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, type CSSProperties } from "react";
+import { TextLayer } from "pdfjs-dist";
 import type { RenderTask } from "pdfjs-dist";
 import type { PdfDoc } from "../lib/pdf";
 
@@ -7,6 +8,8 @@ type Props = {
   index: number;
   width: number;
   height: number;
+  /** This page's width at scale 1, in PDF units. Drives `--scale-factor`. */
+  baseWidth: number;
   /**
    * The width to rasterise at. Lags `width` during a zoom gesture: re-rendering
    * on every frame would swamp the worker, and until it catches up CSS stretches
@@ -43,8 +46,9 @@ const PREVIEW_DIVISOR = 3;
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
-function Page({ doc, index, width, height, renderWidth, bandFrom, bandTo, active }: Props) {
+function Page({ doc, index, width, height, baseWidth, renderWidth, bandFrom, bandTo, active }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textRef = useRef<HTMLDivElement | null>(null);
   /** The slice currently on the canvas, or null if it holds nothing usable. */
   const drawn = useRef<{ f0: number; f1: number } | null>(null);
 
@@ -99,6 +103,7 @@ function Page({ doc, index, width, height, renderWidth, bandFrom, bandTo, active
         task = page.render({ canvasContext: bctx, viewport });
         await task.promise;
         if (cancelled) return;
+
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext("2d", { alpha: false });
         if (!canvas || !ctx) return;
@@ -131,9 +136,60 @@ function Page({ doc, index, width, height, renderWidth, bandFrom, bandTo, active
     };
   }, [doc, index, renderWidth, active, f0, f1]);
 
+  /**
+   * The text layer, rendered once at scale 1 and never again.
+   *
+   * pdf.js positions its spans as percentages of page width and height, and
+   * sizes their type through `--scale-factor`, so a zoom needs nothing from us
+   * but a new value for that variable — no second `getTextContent`, no
+   * re-layout on a pinch frame. The variable tracks `width`, the live box, not
+   * `renderWidth`: the glyph boxes must line up with the geometry the reader is
+   * dragging over, and since the text is transparent nobody sees them lead the
+   * bitmap through the settle.
+   */
+  useEffect(() => {
+    const container = textRef.current;
+    if (!active || !container) return;
+    let cancelled = false;
+    let layer: TextLayer | undefined;
+
+    (async () => {
+      const page = await doc.getPage(index + 1);
+      if (cancelled) return;
+      layer = new TextLayer({
+        textContentSource: page.streamTextContent(),
+        container,
+        viewport: page.getViewport({ scale: 1 }),
+      });
+      try {
+        await layer.render();
+        // pdf.js sizes the container itself, with `round(down, …)` — which can
+        // land a pixel short of the .page box. Its spans are positioned as
+        // percentages *of this container*, so that pixel would shear the whole
+        // text layer off the bitmap. Take the size back.
+        container.style.width = "100%";
+        container.style.height = "100%";
+      } catch {
+        // Scrolled out of the band mid-render, or a page with no text at all.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      layer?.cancel();
+      container.replaceChildren();
+    };
+  }, [doc, index, active]);
+
   return (
-    <div className="page" data-index={index} style={{ width, height }}>
+    <div
+      className="page"
+      data-index={index}
+      // `--scale-factor` is what makes the text layer follow a zoom for free.
+      style={{ width, height, "--scale-factor": baseWidth ? width / baseWidth : 1 } as CSSProperties}
+    >
       {active && <canvas ref={canvasRef} />}
+      <div className="textLayer" ref={textRef} />
     </div>
   );
 }

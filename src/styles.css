@@ -11,6 +11,7 @@
   --hairline: #2b2b2a;
   --veil: rgba(246, 245, 242, 0.86);
   --page-filter: none;
+  --sel-tint: rgba(120, 150, 255, 0.26);
 }
 :root[data-theme="sepia"] {
   --bg: #efe6d3;
@@ -19,6 +20,7 @@
   --hairline: #6b5a44;
   --veil: rgba(239, 230, 211, 0.88);
   --page-filter: sepia(0.16) contrast(0.97) brightness(0.99);
+  --sel-tint: rgba(120, 110, 200, 0.24);
 }
 :root[data-theme="dim"] {
   --bg: #1b1b1d;
@@ -28,6 +30,7 @@
   --veil: rgba(27, 27, 29, 0.9);
   --page-filter: invert(0.91) hue-rotate(180deg) contrast(0.9) brightness(1.04);
   --page-shadow: none;
+  --sel-tint: rgba(120, 140, 220, 0.3);
 }
 :root[data-theme="black"] {
   --bg: #000;
@@ -37,6 +40,7 @@
   --veil: rgba(0, 0, 0, 0.92);
   --page-filter: invert(1) hue-rotate(180deg) contrast(0.88);
   --page-shadow: none;
+  --sel-tint: rgba(110, 130, 210, 0.32);
 }
 
 /* ---------- base ---------- */
@@ -53,8 +57,21 @@ body {
   transition: background-color 260ms var(--ease), color 260ms var(--ease);
 }
 
-/* Nothing in a reading surface should be selectable-by-accident or draggable. */
-body { user-select: none; }
+/* Nothing in a reading surface should be selectable-by-accident — but the rule
+   is applied to the chrome rather than to `body`, and deliberately so. WebKit
+   has a long history of treating an ancestor's `user-select: none` as final and
+   ignoring a descendant's `text`, and the text layer is the one thing here that
+   must be selectable. Opting the chrome out is the direction that cannot fail
+   in the WebView. */
+.titlebar,
+.chrome,
+.spotlight,
+.veil,
+.keys,
+.welcome {
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* ---------- window drag strip (macOS overlay titlebar) ---------- */
 .titlebar {
@@ -74,8 +91,6 @@ body { user-select: none; }
   overscroll-behavior: none;
   touch-action: pan-x pan-y;
 }
-.scroller[data-pannable="true"] { cursor: grab; }
-.scroller[data-panning="true"] { cursor: grabbing; }
 .scroller::-webkit-scrollbar { display: none; }
 
 /* `align-items: center` would put the left overflow out of reach once a page
@@ -108,6 +123,41 @@ body { user-select: none; }
   height: 100%;
   filter: var(--page-filter);
 }
+
+/* ---------- text layer ---------- */
+/* Built once per page at scale 1. pdf.js positions its spans as percentages of
+   this box and sizes their type through --scale-factor, so a zoom costs one
+   custom-property write and no worker traffic at all. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* `overflow: hidden` on .page makes it programmatically scrollable, and a
+     span placed a hair outside the box would let a drag scroll the page out
+     from under its own canvas. Clip here so there is nothing to scroll to. */
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.textLayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  cursor: text;
+}
+.textLayer span.markedContent { top: 0; height: 0; }
+.textLayer span[role="img"] { user-select: none; cursor: default; }
+/* Must stay translucent: these glyphs are transparent and sit *above* the
+   canvas, so an opaque selection colour paints a solid slab over the words. */
+.textLayer ::selection { background: var(--sel-tint); }
+.textLayer br::selection { background: transparent; }
 
 /* ---------- focus spotlight ---------- */
 .spotlight {
