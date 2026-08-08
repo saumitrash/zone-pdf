@@ -9,8 +9,20 @@ const PAD_TOP = 56;
 const PAD_X = 24;
 /** Widest a page gets at zoom 1. Beyond this, lines are too long to track. */
 const MAX_PAGE_WIDTH = 860;
-/** Pages rendered outside the viewport, each direction. */
-const OVERSCAN = 2;
+/**
+ * The strip of the document worth holding pixels for: the viewport plus this
+ * many viewport-heights of slack each way. It decides both which pages mount a
+ * canvas and — once a page grows taller than the strip — which slice of that
+ * page is rasterised, so the two can never disagree.
+ *
+ * It is carried in *page units* (page index plus fraction), not scroll pixels,
+ * for one reason: that is the coordinate an anchored zoom preserves. In pixels
+ * the band would shift on every frame of a pinch and fire a render per frame —
+ * exactly what SETTLE_MS exists to prevent.
+ */
+const BAND_MARGIN = 0.75;
+/** Band edges snap to eighths of a page, so small scrolls do not re-rasterise. */
+const BAND_Q = 8;
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 5;
@@ -41,6 +53,8 @@ export function Reader({ doc, path, title }: Props) {
   const [ratios, setRatios] = useState<number[]>([]);
   const [current, setCurrent] = useState(bookmark?.page ?? 0);
   const [progress, setProgress] = useState(0);
+  /** Page units; see BAND_MARGIN. Maintained by the scroll handler. */
+  const [band, setBand] = useState({ from: 0, to: 1 });
   const restored = useRef(false);
 
   // Zoom is a reading aid, not a preference: local, unpersisted, and reset for
@@ -238,6 +252,24 @@ export function Reader({ doc, path, title }: Props) {
     if (!el || !tops.length) return;
     let frame = 0;
 
+    const syncBand = () => {
+      const y = el.scrollTop;
+      const p = pageAt(y);
+      const h = heights[p] || 1;
+      // Where we sit, in the page units an anchored zoom holds still. The span
+      // is measured against the *settled* page height rather than the live one,
+      // so a pinch in flight cannot widen or narrow the band either.
+      const pos = p + (y - tops[p]) / h;
+      // `h * renderWidth / pageWidth` is this page's settled height: the live
+      // height and pageWidth move together, so their ratio survives the gesture.
+      const view = el.clientHeight / ((h * renderWidth) / pageWidth);
+      const from = Math.floor((pos - view * BAND_MARGIN) * BAND_Q) / BAND_Q;
+      const to = Math.ceil((pos + view * (1 + BAND_MARGIN)) * BAND_Q) / BAND_Q;
+      // Same object back when nothing crossed a lattice line, so the pages do
+      // not reconcile on every frame of an ordinary scroll.
+      setBand((b) => (b.from === from && b.to === to ? b : { from, to }));
+    };
+
     const onScroll = () => {
       if (frame) return;
       frame = requestAnimationFrame(() => {
@@ -248,6 +280,7 @@ export function Reader({ doc, path, title }: Props) {
         setCurrent(pageAt(y + el.clientHeight / 3));
         const span = el.scrollHeight - el.clientHeight;
         setProgress(span > 0 ? Math.min(1, y / span) : 0);
+        syncBand();
         const page = pageAt(y);
         const within = y - tops[page];
         remember(path, {
@@ -261,13 +294,16 @@ export function Reader({ doc, path, title }: Props) {
       });
     };
 
+    // Directly, not through onScroll: rAF is suspended in a background window,
+    // and with no band nothing would mount a canvas at all.
+    syncBand();
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(frame);
     };
-  }, [tops, heights, pageAt, path, title, count, remember]);
+  }, [tops, heights, pageAt, path, title, count, remember, renderWidth, pageWidth]);
 
   // --- pointer: pinch, modifier-wheel, drag-to-pan --------------------------
   // Attached once and reaching state through refs, so a re-render mid-gesture
@@ -415,16 +451,15 @@ export function Reader({ doc, path, title }: Props) {
   }, [tops, pageAt, zoomFromCentre]);
 
   // --- which pages carry a canvas ------------------------------------------
-  const visible = useMemo(() => {
-    const el = scrollerRef.current;
-    const viewport = el?.clientHeight ?? 900;
-    const top = el?.scrollTop ?? 0;
-    const first = pageAt(Math.max(0, top));
-    const last = pageAt(top + viewport);
-    // Canvases grow with the square of the zoom; keep fewer of them alive.
-    const over = zoom > 2 ? 1 : OVERSCAN;
-    return { from: Math.max(0, first - over), to: Math.min(count - 1, last + over) };
-  }, [current, pageAt, count, zoom]);
+  // Straight from the band, so a mounted page is always one the band covers —
+  // PageView would otherwise be asked for a slice that does not intersect it.
+  const visible = useMemo(
+    () => ({
+      from: Math.max(0, Math.floor(band.from)),
+      to: Math.min(count - 1, Math.floor(band.to)),
+    }),
+    [band, count],
+  );
 
   return (
     <>
@@ -447,6 +482,8 @@ export function Reader({ doc, path, title }: Props) {
               width={pageWidth}
               height={h}
               renderWidth={renderWidth}
+              bandFrom={band.from}
+              bandTo={band.to}
               active={i >= visible.from && i <= visible.to}
             />
           ))}

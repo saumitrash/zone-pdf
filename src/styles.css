@@ -96,8 +96,14 @@ body { user-select: none; }
   border-radius: 2px;
   overflow: hidden;
 }
+/* Absolute because at high zoom the canvas holds only the on-screen slice of
+   the page; PageView sets `top`/`height` imperatively, in the same block as the
+   bitmap swap, so geometry and pixels can never be shown out of step. */
 .page canvas {
   display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   filter: var(--page-filter);

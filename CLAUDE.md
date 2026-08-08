@@ -117,21 +117,48 @@ Consequences worth preserving:
 - The **counter reads a third of the way down the viewport** (the page you are
   looking at) while the **bookmark stays exact at `scrollTop`**. Two anchors, on
   purpose.
-- Only pages within viewport ±`OVERSCAN` mount a canvas; the rest are empty sized
-  divs. **`PageView` is `memo`-wrapped and every prop it takes is a primitive**
+- **The `band` decides everything about pixels.** It is the strip worth holding
+  rasterised — the viewport plus `BAND_MARGIN` of slack each way — and it alone
+  decides both which pages mount a canvas and which slice of a page gets
+  rasterised, so the two can never disagree. It replaced a page-count
+  `OVERSCAN`; pages outside it are empty sized divs.
+  **The band is carried in *page units* (page index plus fraction), not scroll
+  pixels, and that is load-bearing.** Page units are exactly what the zoom anchor
+  holds still, so the band does not move during a pinch. In pixels it would shift
+  every frame and fire a render per frame — precisely what `SETTLE_MS` exists to
+  prevent. For the same reason its span is measured against the *settled* page
+  height (`renderWidth / pageWidth`), not the live one. Edges snap to `BAND_Q`
+  eighths of a page so ordinary scrolling does not re-rasterise.
+- **`PageView` is `memo`-wrapped and every prop it takes is a primitive**
   — `progress` changes on every scroll frame, so without that, each frame
   reconciles every page in the document. Passing it an inline object or arrow
   prop would silently undo this. For the same reason `Reader` reads the bookmark
   through `useStore.getState()` rather than a selector: `remember` writes a new
-  object at scroll rate. Backing-store resolution is capped at 2× DPR in `PageView.tsx`, and again
-  by total area (`MAX_BACKING_PX`) so a 5× page cannot allocate hundreds of MB.
+  object at scroll rate.
+- **At high zoom only the visible slice of a page is rasterised.** `PageView`
+  intersects the band with its own index to get two fractions of page height,
+  and cuts the strip by translating the pdf.js viewport (`offsetY`) rather than
+  by cropping afterwards; the canvas is `position: absolute` with `top`/`height`
+  in *percent*, so the strip tracks the box as zoom changes. Fractions, not
+  pixels, throughout — that is what survives a zoom.
+  A band wider than a whole page (every page at ordinary zoom) skips slicing
+  entirely and renders in one shot, as it always did. Resolution is still capped
+  at 2× DPR and by total area (`MAX_BACKING_PX`), but the cap now applies to the
+  strip, so a 3× page renders at ~full device resolution instead of the ~1.2×
+  the whole-page cap used to force.
+- **The canvas is never rendered into directly.** Each pass builds its bitmap on
+  a detached canvas and only then resizes, blits and repositions the live one —
+  all in one synchronous block. Sizing a live canvas *clears* it, so rendering
+  straight into it left a window where the document could be caught blank or
+  half-swapped. A slice that has moved (nothing on screen to stretch) gets a
+  cheap `PREVIEW_DIVISOR` pass first, so something legible lands immediately.
 - **Zoom is local to `Reader` and deliberately not persisted** — it is a reading
   aid, and `App` keys `Reader` by path so every document opens at 1×.
 - **`pageWidth` and `renderWidth` are two different things.** The first sizes the
   `.page` box every frame so `tops[]` stays exact; the second lags it by
-  `SETTLE_MS` and drives the canvas. Setting `canvas.width` *clears* the canvas,
-  so rasterising on every gesture frame would strobe the whole document; while
-  `renderWidth` trails, CSS stretches the old bitmap as a blurry preview.
+  `SETTLE_MS` and drives the canvas — rasterising on every gesture frame would
+  swamp the worker. While `renderWidth` trails, CSS stretches the old bitmap as a
+  free preview.
 - **Zoom anchors on a page-relative fraction**, captured before the change and
   applied in a `useLayoutEffect` after the new boxes commit. `applyZoom` is the
   only entry point and skips capture when the value is already clamped, so a
