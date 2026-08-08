@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vite dep-optimizer cache, written when vite runs from the repo root
+.vite

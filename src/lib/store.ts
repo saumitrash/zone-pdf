@@ -7,8 +7,10 @@ export type Theme = (typeof THEMES)[number];
 /** Where the reader was in a given document. */
 export type Bookmark = {
   page: number;
-  /** px offset from the top of `page`, so it survives zoom/placeholder changes. */
+  /** px offset from the top of `page`, at the zoom the mark was taken at. */
   offset: number;
+  /** The same offset as a fraction of page height, so it survives zoom. */
+  frac?: number;
   title: string;
   pages: number;
   lastOpened: number;
@@ -16,19 +18,17 @@ export type Bookmark = {
 
 type Persisted = {
   theme: Theme;
-  zoom: number;
   focus: boolean;
   library: Record<string, Bookmark>;
 };
 
-const DEFAULTS: Persisted = { theme: "paper", zoom: 1, focus: false, library: {} };
+const DEFAULTS: Persisted = { theme: "paper", focus: false, library: {} };
 
 type Store = Persisted & {
   ready: boolean;
   hydrate: () => Promise<void>;
   setTheme: (t: Theme) => void;
   cycleTheme: () => void;
-  setZoom: (z: number) => void;
   toggleFocus: () => void;
   remember: (path: string, mark: Bookmark) => void;
   forget: (path: string) => void;
@@ -48,7 +48,6 @@ export const useStore = create<Store>((set, get) => ({
     set(({ theme }) => ({
       theme: THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length],
     })),
-  setZoom: (zoom) => set({ zoom: Math.min(3, Math.max(0.5, zoom)) }),
   toggleFocus: () => set(({ focus }) => ({ focus: !focus })),
 
   remember: (path, mark) => set({ library: { ...get().library, [path]: mark } }),
@@ -60,9 +59,10 @@ export const useStore = create<Store>((set, get) => ({
 }));
 
 // Persist prefs + library, coalescing bursts of scroll updates.
+// Zoom is deliberately absent: it is a transient reading aid, reset per document.
 let timer: ReturnType<typeof setTimeout> | undefined;
-useStore.subscribe(({ ready, theme, zoom, focus, library }) => {
+useStore.subscribe(({ ready, theme, focus, library }) => {
   if (!ready) return;
   clearTimeout(timer);
-  timer = setTimeout(() => void saveState({ theme, zoom, focus, library }), 400);
+  timer = setTimeout(() => void saveState({ theme, focus, library }), 400);
 });

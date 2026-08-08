@@ -21,7 +21,9 @@ Requires Rust (`rustup`) and Xcode command line tools.
 | `⇧space` / `k` / `↑` | back a screen |
 | `n` / `p` | next / previous page |
 | `g` / `⇧g` | start / end |
-| `+` `−` `0` | zoom |
+| `+` `−` `0` | zoom in / out / reset |
+| pinch / `⇧`scroll | zoom at the cursor |
+| drag | pan a zoomed page |
 | `t` | cycle theme — paper, sepia, dim, black |
 | `d` | focus band (dims the top and bottom of the viewport) |
 | `f` | fullscreen |
@@ -111,8 +113,11 @@ heights it builds a `tops[]` array, which gives three things cheaply:
 - a stable bookmark anchor: `{ page, offset-within-page }` rather than a raw
   scroll position, so restoring survives a zoom or window resize
 
-Only pages within the viewport ±2 hold a canvas. Everything else is an empty
-sized `div`, so a 600-page book costs the same memory as a 6-page one.
+Only pages near the viewport hold a canvas. Everything else is an empty sized
+`div`, so a 600-page book costs the same memory as a 6-page one. Zoomed in far
+enough that a page no longer fits that window, only the strip you are actually
+looking at is rasterised — which is also why a magnified page stays sharp
+instead of hitting the whole-page memory cap.
 
 **Dark themes invert the canvas** with `filter: invert() hue-rotate(180deg)`
 rather than tinting the background, so black text on white becomes light text

@@ -68,16 +68,23 @@ body { user-select: none; }
 .scroller {
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* A page zoomed wider than the window has to be reachable. */
+  overflow-x: auto;
   scrollbar-width: none;
   overscroll-behavior: none;
+  touch-action: pan-x pan-y;
 }
+.scroller[data-pannable="true"] { cursor: grab; }
+.scroller[data-panning="true"] { cursor: grabbing; }
 .scroller::-webkit-scrollbar { display: none; }
 
+/* `align-items: center` would put the left overflow out of reach once a page
+   is wider than the container; Reader centres with computed padding instead.
+   The gap/padding here are only a pre-mount fallback — the inline styles win. */
 .pages {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 18px;
   padding: 56px 24px 60vh;
 }
@@ -89,8 +96,14 @@ body { user-select: none; }
   border-radius: 2px;
   overflow: hidden;
 }
+/* Absolute because at high zoom the canvas holds only the on-screen slice of
+   the page; PageView sets `top`/`height` imperatively, in the same block as the
+   bitmap swap, so geometry and pixels can never be shown out of step. */
 .page canvas {
   display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   filter: var(--page-filter);
