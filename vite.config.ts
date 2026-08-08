@@ -8,6 +8,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // The pdf.js worker is a worker entry, not a dependency — letting the dep
+  // optimizer pre-bundle it breaks its module scope.
+  optimizeDeps: { exclude: ["pdfjs-dist/build/pdf.worker.min.mjs"] },
+
+  // Match the oldest OS WebView we target rather than the dev browser.
+  build: { target: "safari15" },
+  esbuild: { target: "safari15" },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
