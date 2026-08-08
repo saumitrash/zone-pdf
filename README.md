@@ -23,7 +23,8 @@ Requires Rust (`rustup`) and Xcode command line tools.
 | `g` / `⇧g` | start / end |
 | `+` `−` `0` | zoom in / out / reset |
 | pinch / `⇧`scroll | zoom at the cursor |
-| drag | pan a zoomed page |
+| drag over text | select, then highlight |
+| click a highlight | remove it |
 | `t` | cycle theme — paper, sepia, dim, black |
 | `d` | focus band (dims the top and bottom of the viewport) |
 | `f` | fullscreen |
@@ -32,6 +33,20 @@ Requires Rust (`rustup`) and Xcode command line tools.
 
 Move the pointer and the window shows a hairline progress bar and a page
 counter. Leave it still for two seconds and both fade, along with the cursor.
+
+## Highlights
+
+Drag across a line or a passage and hold still for half a second; a small pill
+fades in over the selection carrying the highlight colour. Click it to mark the
+passage, click the mark again to remove it. The bar is painted into the page
+bitmap rather than laid over it, so it sits genuinely behind the words and the
+type stays as crisp as it was — and one colour covers all four themes, since it
+goes through the same filter as the page. Selecting text that is already marked
+offers nothing: the bar is already there.
+
+Marks are stored as fractions of the page box, not pixels, which is what lets
+them survive a zoom, a window resize and a reopen. They live in `library.json`
+alongside the bookmarks.
 
 ## Stack
 
@@ -132,6 +147,4 @@ on dark and photographs stay roughly correct.
   Fixed-layout mode stays as the fallback for scans and heavy math.
 - **File associations** — bundle config plus handling macOS `RunEvent::Opened`
   so double-clicking a PDF opens Zone.
-- **Annotations** — highlights keyed to text-item indices, stored next to the
-  bookmark.
 - **Outline / table of contents** — `doc.getOutline()`, shown only on a keypress.

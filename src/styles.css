@@ -11,6 +11,8 @@
   --hairline: #2b2b2a;
   --veil: rgba(246, 245, 242, 0.86);
   --page-filter: none;
+  --hl-swatch: #ffe06b;
+  --sel-tint: rgba(120, 150, 255, 0.26);
 }
 :root[data-theme="sepia"] {
   --bg: #efe6d3;
@@ -19,6 +21,8 @@
   --hairline: #6b5a44;
   --veil: rgba(239, 230, 211, 0.88);
   --page-filter: sepia(0.16) contrast(0.97) brightness(0.99);
+  --hl-swatch: #f4cf6a;
+  --sel-tint: rgba(120, 110, 200, 0.24);
 }
 :root[data-theme="dim"] {
   --bg: #1b1b1d;
@@ -28,6 +32,8 @@
   --veil: rgba(27, 27, 29, 0.9);
   --page-filter: invert(0.91) hue-rotate(180deg) contrast(0.9) brightness(1.04);
   --page-shadow: none;
+  --hl-swatch: #c2a047;
+  --sel-tint: rgba(120, 140, 220, 0.3);
 }
 :root[data-theme="black"] {
   --bg: #000;
@@ -37,6 +43,8 @@
   --veil: rgba(0, 0, 0, 0.92);
   --page-filter: invert(1) hue-rotate(180deg) contrast(0.88);
   --page-shadow: none;
+  --hl-swatch: #b3923c;
+  --sel-tint: rgba(110, 130, 210, 0.32);
 }
 
 /* ---------- base ---------- */
@@ -53,8 +61,22 @@ body {
   transition: background-color 260ms var(--ease), color 260ms var(--ease);
 }
 
-/* Nothing in a reading surface should be selectable-by-accident or draggable. */
-body { user-select: none; }
+/* Nothing in a reading surface should be selectable-by-accident — but the rule
+   is applied to the chrome rather than to `body`, and deliberately so. WebKit
+   has a long history of treating an ancestor's `user-select: none` as final and
+   ignoring a descendant's `text`, and the text layer is the one thing here that
+   must be selectable. Opting the chrome out is the direction that cannot fail
+   in the WebView. */
+.titlebar,
+.chrome,
+.spotlight,
+.veil,
+.keys,
+.welcome,
+.hl-pill {
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* ---------- window drag strip (macOS overlay titlebar) ---------- */
 .titlebar {
@@ -74,8 +96,6 @@ body { user-select: none; }
   overscroll-behavior: none;
   touch-action: pan-x pan-y;
 }
-.scroller[data-pannable="true"] { cursor: grab; }
-.scroller[data-panning="true"] { cursor: grabbing; }
 .scroller::-webkit-scrollbar { display: none; }
 
 /* `align-items: center` would put the left overflow out of reach once a page
@@ -108,6 +128,98 @@ body { user-select: none; }
   height: 100%;
   filter: var(--page-filter);
 }
+
+/* ---------- highlights ---------- */
+/* There is no DOM for a highlight bar. It is painted into the page bitmap by
+   PageView, with the canvas `darken` composite op, so it sits behind the type
+   and goes through --page-filter with the rest of the page. Two earlier
+   attempts put it here as a mix-blend-mode overlay; both degraded silently to
+   flat opaque paint that hid the words. Clicking a bar is hit-tested in JS
+   against the same fractions stored on disk, so nothing is needed here. */
+
+/* ---------- text layer ---------- */
+/* Built once per page at scale 1. pdf.js positions its spans as percentages of
+   this box and sizes their type through --scale-factor, so a zoom costs one
+   custom-property write and no worker traffic at all. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* `overflow: hidden` on .page makes it programmatically scrollable, and a
+     span placed a hair outside the box would let a drag scroll the page out
+     from under its own canvas. Clip here so there is nothing to scroll to. */
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.textLayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  cursor: text;
+}
+.textLayer span.markedContent { top: 0; height: 0; }
+.textLayer span[role="img"] { user-select: none; cursor: default; }
+/* Must stay translucent: these glyphs are transparent and sit *above* the
+   canvas, so an opaque selection colour paints a solid slab over the words. */
+.textLayer ::selection { background: var(--sel-tint); }
+.textLayer br::selection { background: transparent; }
+
+/* ---------- the highlight pill ---------- */
+/* Above .chrome (30) so it stays put while the chrome fades at idle, below the
+   veils (50/60). Not a .chrome itself — that class is pointer-events: none. */
+.hl-pill {
+  position: fixed;
+  z-index: 35;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--veil);
+  border: 1px solid color-mix(in oklab, var(--fg) 14%, transparent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: translateY(4px) scale(0.92);
+  transition: opacity 150ms var(--ease), transform 150ms var(--ease);
+}
+.hl-pill[data-in="true"] {
+  opacity: 1;
+  transform: none;
+}
+.hl-pill button {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+/* Both controls are the same amber disc: one offers the colour, the other
+   strikes it out. Same shape and size, so the pill does not resize or shift
+   between its two modes. */
+.hl-swatch,
+.hl-remove {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--fg) 20%, transparent);
+  background: var(--hl-swatch);
+}
+.hl-remove {
+  display: grid;
+  place-items: center;
+  /* A fixed ink rather than --fg: the disc is amber in every theme, so the
+     cross has to read against amber, not against the theme's paper. */
+  color: #3a2e0a;
+}
+.hl-swatch:hover,
+.hl-remove:hover { filter: brightness(0.94); }
 
 /* ---------- focus spotlight ---------- */
 .spotlight {

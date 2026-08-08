@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PdfDoc } from "../lib/pdf";
 import { useStore } from "../lib/store";
 import { PageView } from "./PageView";
+import { Highlighter } from "./Highlighter";
 
 /** Must stay in sync with the inline styles below — layout maths depends on it. */
 const GAP = 18;
@@ -51,6 +52,8 @@ export function Reader({ doc, path, title }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   /** Intrinsic page sizes at scale 1; index 0 is filled first, rest stream in. */
   const [ratios, setRatios] = useState<number[]>([]);
+  /** Page widths at scale 1, in PDF units. The text layer scales against these. */
+  const [baseWidths, setBaseWidths] = useState<number[]>([]);
   const [current, setCurrent] = useState(bookmark?.page ?? 0);
   const [progress, setProgress] = useState(0);
   /** Page units; see BAND_MARGIN. Maintained by the scroll handler. */
@@ -69,6 +72,7 @@ export function Reader({ doc, path, title }: Props) {
   useEffect(() => {
     let cancelled = false;
     setRatios([]);
+    setBaseWidths([]);
     restored.current = false;
 
     (async () => {
@@ -78,16 +82,25 @@ export function Reader({ doc, path, title }: Props) {
       const base = vp.height / vp.width;
       // Assume uniform to get placeholders instantly, then correct in the background.
       const all = new Array<number>(count).fill(base);
+      const widths = new Array<number>(count).fill(vp.width);
       setRatios(all);
+      setBaseWidths(widths);
 
       for (let i = 1; i < count; i++) {
         const page = await doc.getPage(i + 1);
         if (cancelled) return;
         const v = page.getViewport({ scale: 1 });
         all[i] = v.height / v.width;
-        if (i % 40 === 0) setRatios([...all]);
+        widths[i] = v.width;
+        if (i % 40 === 0) {
+          setRatios([...all]);
+          setBaseWidths([...widths]);
+        }
       }
-      if (!cancelled) setRatios([...all]);
+      if (!cancelled) {
+        setRatios([...all]);
+        setBaseWidths([...widths]);
+      }
     })();
 
     return () => {
@@ -132,9 +145,6 @@ export function Reader({ doc, path, title }: Props) {
     () => Math.max(PAD_X, Math.round((containerWidth - pageWidth) / 2)),
     [containerWidth, pageWidth],
   );
-  const pannable = containerWidth > 0 && pageWidth + PAD_X * 2 > containerWidth;
-  const pannableRef = useRef(pannable);
-  pannableRef.current = pannable;
 
   const heights = useMemo(
     () => ratios.map((r) => Math.round(pageWidth * r)),
@@ -305,7 +315,7 @@ export function Reader({ doc, path, title }: Props) {
     };
   }, [tops, heights, pageAt, path, title, count, remember, renderWidth, pageWidth]);
 
-  // --- pointer: pinch, modifier-wheel, drag-to-pan --------------------------
+  // --- pointer: pinch and modifier-wheel ------------------------------------
   // Attached once and reaching state through refs, so a re-render mid-gesture
   // cannot tear the listeners down and lose the gesture's baseline.
   useEffect(() => {
@@ -341,48 +351,18 @@ export function Reader({ doc, path, title }: Props) {
     };
     const onGestureEnd = (ev: Event) => ev.preventDefault();
 
-    // Drag to pan, but only while the page is wider than the window: otherwise
-    // a stray click-and-twitch would shove the document around.
-    const drag = { on: false, x: 0, y: 0 };
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0 || !pannableRef.current) return;
-      drag.on = true;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
-      el.dataset.panning = "true";
-      el.setPointerCapture(e.pointerId);
-    };
-    const onPointerMove = (e: PointerEvent) => {
-      if (!drag.on) return;
-      el.scrollLeft -= e.clientX - drag.x;
-      el.scrollTop -= e.clientY - drag.y;
-      drag.x = e.clientX;
-      drag.y = e.clientY;
-    };
-    const onPointerUp = (e: PointerEvent) => {
-      if (!drag.on) return;
-      drag.on = false;
-      delete el.dataset.panning;
-      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
-    };
-
+    // There is deliberately no drag-to-pan: left-drag belongs to text
+    // selection, which is what highlighting is built on. A page wider than the
+    // window is reached with the trackpad or shift-scroll instead.
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("gesturestart", onGestureStart);
     el.addEventListener("gesturechange", onGestureChange);
     el.addEventListener("gestureend", onGestureEnd);
-    el.addEventListener("pointerdown", onPointerDown);
-    el.addEventListener("pointermove", onPointerMove);
-    el.addEventListener("pointerup", onPointerUp);
-    el.addEventListener("pointercancel", onPointerUp);
     return () => {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("gesturestart", onGestureStart);
       el.removeEventListener("gesturechange", onGestureChange);
       el.removeEventListener("gestureend", onGestureEnd);
-      el.removeEventListener("pointerdown", onPointerDown);
-      el.removeEventListener("pointermove", onPointerMove);
-      el.removeEventListener("pointerup", onPointerUp);
-      el.removeEventListener("pointercancel", onPointerUp);
     };
   }, []);
 
@@ -463,7 +443,7 @@ export function Reader({ doc, path, title }: Props) {
 
   return (
     <>
-      <div className="scroller" ref={scrollerRef} data-pannable={pannable}>
+      <div className="scroller" ref={scrollerRef}>
         <div
           className="pages"
           // min-width so the trailing padding survives: a scroll container does
@@ -478,9 +458,11 @@ export function Reader({ doc, path, title }: Props) {
             <PageView
               key={i}
               doc={doc}
+              path={path}
               index={i}
               width={pageWidth}
               height={h}
+              baseWidth={baseWidths[i] ?? 0}
               renderWidth={renderWidth}
               bandFrom={band.from}
               bandTo={band.to}
@@ -489,6 +471,8 @@ export function Reader({ doc, path, title }: Props) {
           ))}
         </div>
       </div>
+
+      <Highlighter scroller={scrollerRef} path={path} />
 
       <div className="spotlight" data-on={focus} />
 
