@@ -6,13 +6,14 @@ const BINDINGS: [string, string][] = [
   ["g  ⇧g", "start / end"],
   ["+  −  0", "zoom in / out / reset"],
   ["pinch  ⇧scroll", "zoom at the cursor"],
-  ["drag over text", "select text"],
+  ["drag over text", "select, then highlight"],
+  ["click a highlight", "remove it"],
   ["t", "cycle theme"],
   ["d", "focus band"],
   ["f", "fullscreen"],
   ["o", "open a PDF"],
   ["w", "close"],
-  ["?  esc", "this list"],
+  ["?  esc", "this list / dismiss"],
 ];
 
 export function Keys({ onClose }: { onClose: () => void }) {

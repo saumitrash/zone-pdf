@@ -1,10 +1,13 @@
-import { memo, useEffect, useRef, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { TextLayer } from "pdfjs-dist";
 import type { RenderTask } from "pdfjs-dist";
 import type { PdfDoc } from "../lib/pdf";
+import { useStore } from "../lib/store";
 
 type Props = {
   doc: PdfDoc;
+  /** The document this page belongs to; the key its highlights are stored under. */
+  path: string;
   index: number;
   width: number;
   height: number;
@@ -46,8 +49,29 @@ const PREVIEW_DIVISOR = 3;
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
-function Page({ doc, index, width, height, baseWidth, renderWidth, bandFrom, bandTo, active }: Props) {
+/**
+ * The highlighter colour, painted *into* the page bitmap.
+ *
+ * One value for all four themes, because the bars go through
+ * `--page-filter` along with the rest of the page — the same inversion that
+ * turns white paper dark turns this light amber into a dark amber, with no
+ * per-theme tuning at all.
+ */
+const HL_TINT = "#ffe06b";
+
+function Page({ doc, path, index, width, height, baseWidth, renderWidth, bandFrom, bandTo, active }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Subscribed to here rather than passed in: `highlights[path]` keeps its
+  // identity across the bookmark writes that happen at scroll rate, so this
+  // re-renders only when a mark is actually added or removed — and PageView's
+  // props stay primitives, which is what keeps `memo` doing its job.
+  const all = useStore((s) => s.highlights[path]);
+  const bars = useMemo(
+    () => (all ?? []).filter((h) => h.page === index).flatMap((h) => h.rects),
+    [all, index],
+  );
+  // A primitive the render effect can depend on; `bars` is a fresh array.
+  const sig = bars.map((r) => `${r.x},${r.y},${r.w},${r.h}`).join(";");
   const textRef = useRef<HTMLDivElement | null>(null);
   /** The slice currently on the canvas, or null if it holds nothing usable. */
   const drawn = useRef<{ f0: number; f1: number } | null>(null);
@@ -104,6 +128,25 @@ function Page({ doc, index, width, height, baseWidth, renderWidth, bandFrom, ban
         await task.promise;
         if (cancelled) return;
 
+        // Highlights are painted into the bitmap, not laid over it as DOM.
+        // `darken` keeps the darker of page and tint per channel, so paper
+        // turns amber and the glyphs stay exactly as dark as they were — the
+        // bar reads as sitting *behind* the words. Doing it here rather than
+        // with `mix-blend-mode` on a sibling element is deliberate: a CSS blend
+        // has to reach across a compositing boundary to find the canvas, and
+        // when it fails to it degrades silently to flat opaque paint that hides
+        // the text outright. Inside one 2d context there is no such boundary.
+        // It is idempotent too, so overlapping marks cannot darken each other.
+        if (bars.length) {
+          bctx.save();
+          bctx.globalCompositeOperation = "darken";
+          bctx.fillStyle = HL_TINT;
+          for (const r of bars) {
+            bctx.fillRect(r.x * w, ((r.y - f0) / frac) * h, r.w * w, (r.h / frac) * h);
+          }
+          bctx.restore();
+        }
+
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext("2d", { alpha: false });
         if (!canvas || !ctx) return;
@@ -134,7 +177,7 @@ function Page({ doc, index, width, height, baseWidth, renderWidth, bandFrom, ban
       cancelled = true;
       task?.cancel();
     };
-  }, [doc, index, renderWidth, active, f0, f1]);
+  }, [doc, index, renderWidth, active, f0, f1, sig]);
 
   /**
    * The text layer, rendered once at scale 1 and never again.

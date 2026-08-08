@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PdfDoc } from "../lib/pdf";
 import { useStore } from "../lib/store";
 import { PageView } from "./PageView";
+import { Highlighter } from "./Highlighter";
 
 /** Must stay in sync with the inline styles below — layout maths depends on it. */
 const GAP = 18;
@@ -351,8 +352,8 @@ export function Reader({ doc, path, title }: Props) {
     const onGestureEnd = (ev: Event) => ev.preventDefault();
 
     // There is deliberately no drag-to-pan: left-drag belongs to text
-    // selection. A page wider than the window is reached with the trackpad or
-    // shift-scroll instead.
+    // selection, which is what highlighting is built on. A page wider than the
+    // window is reached with the trackpad or shift-scroll instead.
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("gesturestart", onGestureStart);
     el.addEventListener("gesturechange", onGestureChange);
@@ -457,6 +458,7 @@ export function Reader({ doc, path, title }: Props) {
             <PageView
               key={i}
               doc={doc}
+              path={path}
               index={i}
               width={pageWidth}
               height={h}
@@ -469,6 +471,8 @@ export function Reader({ doc, path, title }: Props) {
           ))}
         </div>
       </div>
+
+      <Highlighter scroller={scrollerRef} path={path} />
 
       <div className="spotlight" data-on={focus} />
 
