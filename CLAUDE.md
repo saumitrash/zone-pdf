@@ -168,6 +168,71 @@ Consequences worth preserving:
   and the JS-computed `padX`. `.pages` also carries a `minWidth` — a scroll
   container will not extend `scrollWidth` for a flex child's overflow, so the
   trailing padding vanishes without it.
+- **There is no drag-to-pan.** Left-drag belongs to text selection, which is
+  what highlighting is built on. Panning a zoomed page is trackpad or
+  shift-scroll only. Do not reintroduce a pointer-drag handler on `.scroller`.
+
+## Text layer and highlights
+
+Selection, and therefore highlighting, needs a pdf.js `TextLayer`. Four things
+about it are load-bearing:
+
+- **It is built once, at `getViewport({ scale: 1 })`, and never rebuilt.** With
+  the layer's own container as pdf.js's root container, spans are positioned as
+  *percentages* of page width and height and sized with
+  `calc(var(--scale-factor) * Npx)` — so a zoom costs one custom-property write
+  on `.page` and no worker traffic. `--scale-factor` is `pageWidth / baseWidth`
+  and tracks `pageWidth`, the live box, not `renderWidth`.
+- **Take the container's size back after `render()`.** pdf.js writes an inline
+  `round(down, …)` width/height on it, which can land a pixel short of the
+  `.page` box; since its spans are percentages *of that container*, the pixel
+  shears the whole layer off the bitmap. `PageView` resets both to `100%`.
+- **A highlight bar is not DOM — it is painted into the page bitmap.** `PageView`
+  fills its rects onto the off-screen buffer with the 2d `darken` composite op,
+  right after `page.render()` and before the blit. `darken` keeps the darker of
+  page and tint per channel, so paper turns amber and the glyphs stay exactly as
+  dark as they were: the bar reads as sitting *behind* the words. It is
+  idempotent, so overlapping marks cannot darken each other, and because the
+  bars go through `--page-filter` with the rest of the page, **one tint
+  (`HL_TINT`) serves all four themes** — the inversion that turns white paper
+  dark turns light amber into dark amber for free.
+  This replaced two attempts at a `mix-blend-mode` overlay in a sibling `.marks`
+  div, and the reason is worth keeping: a CSS blend has to reach across a
+  compositing boundary to find the canvas, and **when it cannot, it degrades
+  silently to flat opaque paint that hides the text outright.** First a
+  `z-index` on `.marks` made it a stacking context and `multiply` became a grey
+  wash; then `darken` painted solid yellow slabs over whole lines in the native
+  app while looking perfect in Chrome. Inside one 2d context there is no
+  boundary to fail at. Do not reintroduce a DOM overlay for the bars.
+- **`PageView` subscribes to `highlights[path]` itself** rather than taking the
+  rects as a prop. That reference survives the bookmark writes that happen at
+  scroll rate, so it re-renders only when a mark really changes — and the props
+  stay primitives, which is what keeps `memo` working. The cost is that adding
+  or removing a highlight re-rasterises that page; the swap is atomic, so it
+  reads as a brief pause rather than a flash.
+- **Never derive highlight rects from `range.getClientRects()`.** Once a range
+  spans more than one element it also returns a rect per wholly-contained
+  block, up to the page-sized containers — highlighting those paints a slab
+  over the page. `selectionRects` in `src/lib/highlight.ts` walks the range's
+  text nodes instead, which yields line boxes and nothing else.
+
+Two more, outside the layer itself:
+
+- **Highlights are a sibling of `library` in the persisted state, not a field on
+  `Bookmark`.** `remember` rebuilds the whole bookmark on every scroll frame, so
+  anything nested inside one is overwritten sixty times a second.
+- **Overlap is handled at both ends.** The offer pill stays away when a
+  selection is already covered end to end (`covers` in `highlight.ts`, sampling
+  three points per bar so *extending* a mark still offers), and a click removes
+  every group under the cursor rather than the topmost — leaving the others
+  behind looks exactly like the click having done nothing.
+- `user-select: none` is applied to the chrome, **not** to `body`. WebKit has a
+  history of treating an ancestor's `none` as final and ignoring a descendant's
+  `text`, and the text layer is the one thing that must stay selectable.
+
+Stored rects are fractions of the page box, like the bookmark's `frac` — the one
+form that survives zoom, resize and reopening. A selection crossing a page break
+becomes one `Highlight` per page sharing a `group`; removing either removes both.
 
 ## Keybindings live in three files
 
@@ -225,5 +290,6 @@ Reflow mode (extract the text layer, cluster text items by x to detect columns,
 strip repeating headers/footers, re-typeset to a 60–75 character measure) is the
 intended next major feature and the reason pdf.js is used directly rather than
 through a React wrapper — the wrappers hide the viewport and text-item access it
-needs. Also absent: file associations, annotations, and outline/TOC. See the
-README's "Not built yet".
+needs. The text layer added for highlighting is a first step toward it. Also
+absent: file associations, notes attached to highlights, and outline/TOC. See
+the README's "Not built yet".
