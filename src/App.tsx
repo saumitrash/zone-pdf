@@ -19,8 +19,7 @@ const IDLE_MS = 2000;
 type Doc = { doc: PdfDoc; path: string; title: string };
 
 export default function App() {
-  const { ready, theme, zoom, hydrate, cycleTheme, setZoom, toggleFocus, forget } =
-    useStore();
+  const { ready, theme, hydrate, cycleTheme, toggleFocus, forget } = useStore();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,16 +113,6 @@ export default function App() {
         case "w":
           if (doc) close();
           break;
-        case "+":
-        case "=":
-          setZoom(zoom + 0.1);
-          break;
-        case "-":
-          setZoom(zoom - 0.1);
-          break;
-        case "0":
-          setZoom(1);
-          break;
         case "?":
           setShowKeys((v) => !v);
           break;
@@ -134,7 +123,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [cycleTheme, toggleFocus, open, close, doc, setZoom, zoom]);
+  }, [cycleTheme, toggleFocus, open, close, doc]);
 
   // --- idle: strip the window bare -----------------------------------------
   useEffect(() => {

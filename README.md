@@ -21,7 +21,9 @@ Requires Rust (`rustup`) and Xcode command line tools.
 | `⇧space` / `k` / `↑` | back a screen |
 | `n` / `p` | next / previous page |
 | `g` / `⇧g` | start / end |
-| `+` `−` `0` | zoom |
+| `+` `−` `0` | zoom in / out / reset |
+| pinch / `⇧`scroll | zoom at the cursor |
+| drag | pan a zoomed page |
 | `t` | cycle theme — paper, sepia, dim, black |
 | `d` | focus band (dims the top and bottom of the viewport) |
 | `f` | fullscreen |

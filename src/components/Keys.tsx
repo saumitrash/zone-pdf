@@ -5,6 +5,8 @@ const BINDINGS: [string, string][] = [
   ["n  p", "next / previous page"],
   ["g  ⇧g", "start / end"],
   ["+  −  0", "zoom in / out / reset"],
+  ["pinch  ⇧scroll", "zoom at the cursor"],
+  ["drag", "pan a zoomed page"],
   ["t", "cycle theme"],
   ["d", "focus band"],
   ["f", "fullscreen"],

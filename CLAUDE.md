@@ -66,6 +66,14 @@ terminal. The mitigations are load-bearing:
 - `worker.onerror` is wired and `worker.promise` is awaited before parsing, so a
   load failure reports instead of hanging forever.
 
+Pinch-zoom splits the same way, and **only the WebView path matters in the real
+app**. Blink synthesises trackpad pinch as a `wheel` event with `ctrlKey: true`;
+WebKit does not — it fires its own `gesturestart` / `gesturechange` / `gestureend`
+carrying a cumulative `e.scale`, and without `preventDefault()` on all three
+WKWebView zooms the entire window instead of the document. `Reader.tsx` wires
+both families; the `wheel` path is what you can exercise in `npm run dev`, the
+gesture path can only be tested natively.
+
 ## The Rust/JS boundary
 
 Rust owns *all* disk access, via four commands in `src-tauri/src/lib.rs`:
@@ -101,19 +109,43 @@ Consequences worth preserving:
   DOM on purpose** — they are applied as inline styles on `.pages` precisely so
   `tops[]` cannot drift from the rendered layout. If you move this spacing into
   `styles.css`, `tops[]` silently desynchronises and every jump lands wrong.
-- **Bookmarks are `{page, offset-within-page}`**, never a raw scroll offset, so
-  restoring survives zoom and window resize. Restore runs once per document,
-  guarded by the `restored` ref, and uses `behavior: "instant"`.
+- **Bookmarks are `{page, offset-within-page}`**, never a raw scroll offset. The
+  offset is written twice: `offset` in px and `frac` as a share of page height.
+  Only `frac` survives a zoom change — `offset` is the legacy form, still read
+  for library entries written before `frac` existed. Restore runs once per
+  document, guarded by the `restored` ref, and uses `behavior: "instant"`.
 - The **counter reads a third of the way down the viewport** (the page you are
   looking at) while the **bookmark stays exact at `scrollTop`**. Two anchors, on
   purpose.
 - Only pages within viewport ±`OVERSCAN` mount a canvas; the rest are empty sized
-  divs. Backing-store resolution is capped at 2× DPR in `PageView.tsx`.
+  divs. **`PageView` is `memo`-wrapped and every prop it takes is a primitive**
+  — `progress` changes on every scroll frame, so without that, each frame
+  reconciles every page in the document. Passing it an inline object or arrow
+  prop would silently undo this. For the same reason `Reader` reads the bookmark
+  through `useStore.getState()` rather than a selector: `remember` writes a new
+  object at scroll rate. Backing-store resolution is capped at 2× DPR in `PageView.tsx`, and again
+  by total area (`MAX_BACKING_PX`) so a 5× page cannot allocate hundreds of MB.
+- **Zoom is local to `Reader` and deliberately not persisted** — it is a reading
+  aid, and `App` keys `Reader` by path so every document opens at 1×.
+- **`pageWidth` and `renderWidth` are two different things.** The first sizes the
+  `.page` box every frame so `tops[]` stays exact; the second lags it by
+  `SETTLE_MS` and drives the canvas. Setting `canvas.width` *clears* the canvas,
+  so rasterising on every gesture frame would strobe the whole document; while
+  `renderWidth` trails, CSS stretches the old bitmap as a blurry preview.
+- **Zoom anchors on a page-relative fraction**, captured before the change and
+  applied in a `useLayoutEffect` after the new boxes commit. `applyZoom` is the
+  only entry point and skips capture when the value is already clamped, so a
+  stale anchor cannot fire on the next resize.
+- Horizontal panning needs three things together: `overflow-x: auto`,
+  `align-items: flex-start` (flex `center` puts the left overflow out of reach),
+  and the JS-computed `padX`. `.pages` also carries a `minWidth` — a scroll
+  container will not extend `scrollWidth` for a flex child's overflow, so the
+  trailing padding vanishes without it.
 
 ## Keybindings live in three files
 
-Scroll-related keys are in `Reader.tsx`; global ones (theme, focus, fullscreen,
-open/close, zoom, help) are in `App.tsx`; and the `?` overlay list is hardcoded
+Scroll- and zoom-related keys are in `Reader.tsx`; global ones (theme, focus,
+fullscreen, open/close, help) are in `App.tsx`; and the `?` overlay list is hardcoded
 in `Keys.tsx`. **Adding a binding means touching all three.** Branch on
 `e.shiftKey` rather than on an uppercase `e.key` — some layouts and all synthetic
 events report `"g"` + `shiftKey`, not `"G"`.
@@ -144,7 +176,11 @@ by AppleScript. What works:
 - **Browser checks for anything visual**, via the fallback above. Watch for
   `document.visibilityState === "hidden"`: a backgrounded tab suspends
   `requestAnimationFrame` and `behavior: "smooth"` scrolling and swallows
-  synthetic key events, which looks exactly like broken code.
+  synthetic key events, which looks exactly like broken code. A tab driven by
+  browser automation is hidden almost all the time, so any probe that awaits
+  `requestAnimationFrame` hangs until the tool times out — wait on `setTimeout`
+  instead, and keep the total under the tool's limit since background timers are
+  throttled to ~1s too.
 
 ## Deliberately not built
 

@@ -68,16 +68,23 @@ body { user-select: none; }
 .scroller {
   height: 100%;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* A page zoomed wider than the window has to be reachable. */
+  overflow-x: auto;
   scrollbar-width: none;
   overscroll-behavior: none;
+  touch-action: pan-x pan-y;
 }
+.scroller[data-pannable="true"] { cursor: grab; }
+.scroller[data-panning="true"] { cursor: grabbing; }
 .scroller::-webkit-scrollbar { display: none; }
 
+/* `align-items: center` would put the left overflow out of reach once a page
+   is wider than the container; Reader centres with computed padding instead.
+   The gap/padding here are only a pre-mount fallback — the inline styles win. */
 .pages {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 18px;
   padding: 56px 24px 60vh;
 }
