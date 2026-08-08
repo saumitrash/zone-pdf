@@ -1,0 +1,262 @@
+/* ---------- themes ---------- */
+:root {
+  --page-shadow: 0 1px 3px rgba(0, 0, 0, 0.09), 0 12px 32px rgba(0, 0, 0, 0.07);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+:root[data-theme="paper"] {
+  --bg: #f6f5f2;
+  --fg: #1a1a19;
+  --muted: #8b8a85;
+  --hairline: #2b2b2a;
+  --veil: rgba(246, 245, 242, 0.86);
+  --page-filter: none;
+}
+:root[data-theme="sepia"] {
+  --bg: #efe6d3;
+  --fg: #3a3026;
+  --muted: #9a8b73;
+  --hairline: #6b5a44;
+  --veil: rgba(239, 230, 211, 0.88);
+  --page-filter: sepia(0.16) contrast(0.97) brightness(0.99);
+}
+:root[data-theme="dim"] {
+  --bg: #1b1b1d;
+  --fg: #d6d4cf;
+  --muted: #6d6c69;
+  --hairline: #a8a6a1;
+  --veil: rgba(27, 27, 29, 0.9);
+  --page-filter: invert(0.91) hue-rotate(180deg) contrast(0.9) brightness(1.04);
+  --page-shadow: none;
+}
+:root[data-theme="black"] {
+  --bg: #000;
+  --fg: #b9b7b2;
+  --muted: #55534f;
+  --hairline: #8f8d88;
+  --veil: rgba(0, 0, 0, 0.92);
+  --page-filter: invert(1) hue-rotate(180deg) contrast(0.88);
+  --page-shadow: none;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-serif, "Iowan Old Style", "Palatino", Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  transition: background-color 260ms var(--ease), color 260ms var(--ease);
+}
+
+/* Nothing in a reading surface should be selectable-by-accident or draggable. */
+body { user-select: none; }
+
+/* ---------- window drag strip (macOS overlay titlebar) ---------- */
+.titlebar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 28px;
+  z-index: 40;
+}
+
+/* ---------- reader ---------- */
+.scroller {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: none;
+}
+.scroller::-webkit-scrollbar { display: none; }
+
+.pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 56px 24px 60vh;
+}
+
+.page {
+  position: relative;
+  background: transparent;
+  box-shadow: var(--page-shadow);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: var(--page-filter);
+}
+
+/* ---------- focus spotlight ---------- */
+.spotlight {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--veil) 0%,
+    transparent 26%,
+    transparent 74%,
+    var(--veil) 100%
+  );
+  opacity: 0;
+  transition: opacity 320ms var(--ease);
+}
+.spotlight[data-on="true"] { opacity: 1; }
+
+/* ---------- chrome that fades ---------- */
+.chrome {
+  position: fixed;
+  z-index: 30;
+  transition: opacity 500ms var(--ease);
+  pointer-events: none;
+}
+:root[data-idle="true"] .chrome { opacity: 0; }
+:root[data-idle="true"] .scroller { cursor: none; }
+
+.progress {
+  inset: auto 0 0 0;
+  height: 2px;
+  background: transparent;
+}
+.progress > i {
+  display: block;
+  height: 100%;
+  background: var(--hairline);
+  opacity: 0.5;
+  transform-origin: left;
+}
+
+.counter {
+  inset: auto 0 18px 0;
+  text-align: center;
+  font: 400 11px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* ---------- welcome ---------- */
+.welcome {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 28px;
+  padding: 40px;
+  text-align: center;
+}
+.welcome h1 {
+  margin: 0;
+  font-size: clamp(38px, 7vw, 68px);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.welcome p {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+.open {
+  appearance: none;
+  border: 1px solid color-mix(in oklab, var(--fg) 22%, transparent);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 200ms var(--ease), background-color 200ms var(--ease);
+}
+.open:hover {
+  border-color: color-mix(in oklab, var(--fg) 45%, transparent);
+  background: color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
+.recents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(520px, 100%);
+  margin-top: 4px;
+}
+.recent {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.recent:hover { background: color-mix(in oklab, var(--fg) 6%, transparent); }
+.recent > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent > em {
+  font-style: normal;
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--muted);
+}
+
+/* ---------- drop / load / error states ---------- */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-content: center;
+  background: var(--veil);
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(2px);
+}
+
+/* ---------- keys overlay ---------- */
+.keys {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-content: center;
+  background: var(--veil);
+  backdrop-filter: blur(6px);
+}
+.keys dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 20px;
+  margin: 0;
+  font-size: 14px;
+}
+.keys dt {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--fg);
+  text-align: right;
+}
+.keys dd { margin: 0; color: var(--muted); }
