@@ -209,6 +209,16 @@ by AppleScript. What works:
   instead, and keep the total under the tool's limit since background timers are
   throttled to ~1s too.
 
+  **The same suspension stalls pdf.js itself.** `InternalRenderTask` schedules
+  its continuation through `requestAnimationFrame`, so in a hidden tab a render
+  large enough to be chunked never finishes: canvases sit at the default
+  300x150, with nothing in the console. It looks exactly like a broken render
+  path. Take a screenshot to bring the tab forward, *then* read the DOM. And
+  because instrumentation cannot live on `window` — `javascript_tool` evaluates
+  in an isolated world — route measurements through a `dataset` attribute, or
+  observe the DOM directly: a `MutationObserver` on the `width` attribute counts
+  rasterisations, since setting `canvas.width` reflects to the attribute.
+
 ## Deliberately not built
 
 Reflow mode (extract the text layer, cluster text items by x to detect columns,
