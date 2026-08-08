@@ -1,0 +1,156 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Zone is a distraction-free PDF reader: a Tauri v2 (Rust) desktop shell around a
+React 19 + TypeScript + Vite frontend, rendering with pdf.js. Local files only,
+no network calls anywhere.
+
+## Commands
+
+```sh
+npm run tauri dev            # the real app; frontend hot-reloads, Rust does not
+npm run dev                  # frontend only, in a browser (see "Two runtimes")
+npm run build                # tsc --noEmit equivalent + vite build
+npx tsc --noEmit             # typecheck alone; fast inner loop
+npm run tauri build          # .app + .dmg into src-tauri/target/release/bundle
+
+cd src-tauri && cargo check  # Rust typecheck (~2min cold, ~8s warm)
+cd src-tauri && cargo build  # debug binary at src-tauri/target/debug/zone
+```
+
+Requires `rustup` and Xcode command line tools. If `cargo` is missing from PATH,
+it is at `~/.cargo/bin`.
+
+There is **no test framework in this repo**. Do not invent test commands — see
+"Verifying changes" for how this code is actually checked.
+
+## Two runtimes, one frontend
+
+The frontend runs in two places, and this shapes the whole codebase:
+
+1. **The OS WebView** (WKWebView on macOS) under `npm run tauri dev`.
+2. **A plain browser** under `npm run dev` — `src/lib/bridge.ts` detects the
+   absence of `__TAURI_INTERNALS__` and substitutes `fetch` for disk reads and
+   `localStorage` for persistence. `public/sample.pdf` is the fixture;
+   `http://localhost:1420/?pdf=/sample.pdf` opens it directly.
+
+**Every `@tauri-apps/api` call must go through `src/lib/bridge.ts`.** The window
+and webview helpers read `__TAURI_INTERNALS__` eagerly and *throw synchronously*
+outside the shell — calling one from a component unmounts the React tree and
+leaves a blank page with only a generic React warning. `bridge.ts` is the single
+guarded boundary; add new native calls there, never at the point of use.
+
+Browser behaviour is **not** proof of native behaviour. The reverse of the usual
+assumption applies here: Chrome is the permissive environment, the WebView is
+the strict one.
+
+## WebView engine constraints (read before touching pdf.js)
+
+WKWebView's JS engine is pinned to the installed Safari, not to your dev Chrome.
+pdf.js 5 fails on macOS 14 twice — `Promise.try` (Safari 18) hangs the worker
+handshake, and `Uint8Array.prototype.toHex` (Safari 18.2) throws in the parser.
+**Both are silent:** blank window, and the WebView console is unreachable from a
+terminal. The mitigations are load-bearing:
+
+- **pdf.js is pinned to 4.x.** Upgrading to 5 will break the native app while
+  leaving `npm run dev` working perfectly.
+- **The worker is wrapped, not `workerSrc`.** `src/lib/pdf.worker.ts` imports
+  `src/lib/polyfills.ts` and *then* the real worker, because a worker has its own
+  global scope and main-thread polyfills never reach it. `pdf.ts` passes that
+  `Worker` to `PDFWorker.fromPort` (v4 has no `PDFWorker.create`; the bundled
+  `.d.ts` types the constructor's params as null-only, hence the factory).
+- **`optimizeDeps.exclude`** keeps Vite from pre-bundling the worker entry as a
+  dependency, which breaks its module scope.
+- **esbuild and Rollup target `safari15`**, not esnext.
+- `worker.onerror` is wired and `worker.promise` is awaited before parsing, so a
+  load failure reports instead of hanging forever.
+
+## The Rust/JS boundary
+
+Rust owns *all* disk access, via four commands in `src-tauri/src/lib.rs`:
+`pick_pdf`, `read_file`, `load_state`/`save_state` (plus `dbg`, below).
+
+Consequences worth preserving:
+
+- Because the file dialog is driven from Rust, **the webview holds no filesystem
+  capability at all**. `src-tauri/capabilities/default.json` grants only
+  `core:default` plus three window permissions. Calling a Tauri *plugin* from JS
+  requires adding its permission there; calling your own `#[tauri::command]`
+  does not. Prefer a new Rust command over widening capabilities.
+- `read_file` returns `tauri::ipc::Response` so bytes travel as a binary payload
+  rather than a JSON number array. Don't "simplify" it to `Vec<u8>`.
+- `load_state`/`save_state` treat the library as an **opaque string** — the
+  frontend owns the schema (`Persisted` in `src/lib/store.ts`). Saves go through
+  a temp file and `rename` so a crash cannot truncate the library. State lives at
+  `~/Library/Application Support/com.zone.reader/library.json`.
+- `initial_path` reads argv, which is also where a macOS "Open With" hand-off
+  will land once the bundle declares a file association.
+
+## Reader layout maths
+
+`src/components/Reader.tsx` is where the non-obvious logic lives.
+
+- **Page heights are computed up front, not measured.** Page 1's aspect ratio is
+  assumed for every page so placeholders appear instantly, then real ratios
+  stream in from a background loop that batches `setRatios` every 40 pages.
+- Those heights build a **`tops[]` array** (scroll offset of each page top),
+  which serves three purposes: binary search from scroll offset → current page,
+  exact targets for page jumps, and bookmark anchoring.
+- **`GAP`, `PAD_TOP`, `PAD_X`, `MAX_PAGE_WIDTH` are duplicated between TS and the
+  DOM on purpose** — they are applied as inline styles on `.pages` precisely so
+  `tops[]` cannot drift from the rendered layout. If you move this spacing into
+  `styles.css`, `tops[]` silently desynchronises and every jump lands wrong.
+- **Bookmarks are `{page, offset-within-page}`**, never a raw scroll offset, so
+  restoring survives zoom and window resize. Restore runs once per document,
+  guarded by the `restored` ref, and uses `behavior: "instant"`.
+- The **counter reads a third of the way down the viewport** (the page you are
+  looking at) while the **bookmark stays exact at `scrollTop`**. Two anchors, on
+  purpose.
+- Only pages within viewport ±`OVERSCAN` mount a canvas; the rest are empty sized
+  divs. Backing-store resolution is capped at 2× DPR in `PageView.tsx`.
+
+## Keybindings live in three files
+
+Scroll-related keys are in `Reader.tsx`; global ones (theme, focus, fullscreen,
+open/close, zoom, help) are in `App.tsx`; and the `?` overlay list is hardcoded
+in `Keys.tsx`. **Adding a binding means touching all three.** Branch on
+`e.shiftKey` rather than on an uppercase `e.key` — some layouts and all synthetic
+events report `"g"` + `shiftKey`, not `"G"`.
+
+## Verifying changes
+
+The WebView has no reachable console, and the terminal here lacks Accessibility /
+Screen-Recording rights, so the native window cannot be screenshotted or driven
+by AppleScript. What works:
+
+- **Dev-only error forwarding.** `src/lib/debug.ts` `report()` pushes webview
+  errors to the Rust process's stderr through the `dbg` command, and
+  `src/main.tsx` forwards `error` / `unhandledrejection`. This is the only way to
+  see a WebView failure headlessly — keep it.
+- **Headless native smoke test.** Launch the debug binary with a PDF path and
+  watch two files:
+
+  ```sh
+  rm -f "$HOME/Library/Application Support/com.zone.reader/library.json"
+  nohup ./src-tauri/target/debug/zone /path/to/sample.pdf > app.log 2>&1 & disown
+  # library.json gaining an entry proves the whole chain: IPC → pdf.js parse →
+  # layout → scroll tracking → atomic persist. app.log carries any failure.
+  ```
+
+  Note that a bare `npm run tauri dev` started as a background command gets
+  reaped; launch the built binary with `nohup … & disown` instead, and keep the
+  Vite dev server running separately.
+- **Browser checks for anything visual**, via the fallback above. Watch for
+  `document.visibilityState === "hidden"`: a backgrounded tab suspends
+  `requestAnimationFrame` and `behavior: "smooth"` scrolling and swallows
+  synthetic key events, which looks exactly like broken code.
+
+## Deliberately not built
+
+Reflow mode (extract the text layer, cluster text items by x to detect columns,
+strip repeating headers/footers, re-typeset to a 60–75 character measure) is the
+intended next major feature and the reason pdf.js is used directly rather than
+through a React wrapper — the wrappers hide the viewport and text-item access it
+needs. Also absent: file associations, annotations, and outline/TOC. See the
+README's "Not built yet".
